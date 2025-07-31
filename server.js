@@ -28,7 +28,7 @@ app.use(helmet());
 // Rate limiting - very lenient for development
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 5000, // increased to 5000 requests per windowMs
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 10000, // increased to 10000 requests per windowMs for development
   message: {
     error: 'Too many requests from this IP, please try again later.'
   },
@@ -38,8 +38,26 @@ const limiter = rateLimit({
   skipFailedRequests: false, // Count failed requests
 });
 
-// Apply rate limiting to all routes except health check
-app.use('/api/', limiter);
+// More lenient rate limiting for development
+const devLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 50000, // 50000 requests per 15 minutes for development
+  message: {
+    error: 'Too many requests from this IP, please try again later.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  skipFailedRequests: false,
+});
+
+// Apply rate limiting based on environment
+if (process.env.NODE_ENV === 'production') {
+  app.use('/api/', limiter);
+} else {
+  // In development, use more lenient rate limiting
+  app.use('/api/', devLimiter);
+}
 
 // CORS configuration - more permissive for development
 const corsOptions = {
@@ -111,6 +129,17 @@ app.get('/health', (req, res) => {
     message: 'Server is running',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV
+  });
+});
+
+// Rate limit status endpoint (for debugging)
+app.get('/api/rate-limit-status', (req, res) => {
+  res.status(200).json({
+    message: 'Rate limit status',
+    environment: process.env.NODE_ENV,
+    rateLimitWindow: process.env.NODE_ENV === 'production' ? '15 minutes' : '15 minutes',
+    maxRequests: process.env.NODE_ENV === 'production' ? '10000' : '50000',
+    currentTime: new Date().toISOString()
   });
 });
 
