@@ -12,7 +12,15 @@ const ensureDirectoryExists = (dirPath) => {
 // Configure storage for resumes
 const resumeStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadPath = path.join(__dirname, '../uploads/resumes');
+    // Use a more robust path that works in both local and deployed environments
+    let uploadPath;
+    if (process.env.NODE_ENV === 'production') {
+      // In production, use a path that persists across deployments
+      uploadPath = path.join(process.cwd(), 'uploads', 'resumes');
+    } else {
+      // In development, use relative path
+      uploadPath = path.join(__dirname, '../uploads/resumes');
+    }
     ensureDirectoryExists(uploadPath);
     cb(null, uploadPath);
   },

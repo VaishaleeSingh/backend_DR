@@ -4,24 +4,8 @@ const router = express.Router();
 const { protect, authorize } = require('../middleware/auth');
 const { validateApplication, validatePagination, validateObjectId } = require('../middleware/validation');
 
-// Configure multer for file uploads
-const storage = multer.memoryStorage();
-const upload = multer({
-  storage: storage,
-  limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit
-  },
-  fileFilter: (req, file, cb) => {
-    // Allow only PDF and DOC files for resumes
-    if (file.mimetype === 'application/pdf' ||
-        file.mimetype === 'application/msword' ||
-        file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-      cb(null, true);
-    } else {
-      cb(new Error('Only PDF and DOC files are allowed for resumes'), false);
-    }
-  }
-});
+// Import file upload utilities
+const { uploadResume } = require('../utils/fileUpload');
 const {
   getApplications,
   getApplication,
@@ -34,7 +18,8 @@ const {
   rateApplication,
   getApplicationsByJob,
   exportApplications,
-  bulkUpdateStatus
+  bulkUpdateStatus,
+  downloadResume
 } = require('../controllers/applicationController');
 
 // @route   GET /api/applications
@@ -50,7 +35,7 @@ router.get('/my-applications', protect, authorize('applicant'), validatePaginati
 // @route   POST /api/applications
 // @desc    Create new application (applicants only)
 // @access  Private/Applicant
-router.post('/', protect, authorize('applicant'), upload.single('resume'), validateApplication, createApplication);
+router.post('/', protect, authorize('applicant'), uploadResume.single('resume'), validateApplication, createApplication);
 
 // @route   GET /api/applications/job/:jobId
 // @desc    Get applications for a specific job (recruiters/admin only)
@@ -96,5 +81,10 @@ router.get('/export/:jobId', protect, authorize('recruiter', 'admin'), validateO
 // @desc    Bulk update application status (recruiters/admin only)
 // @access  Private/Recruiter/Admin
 router.patch('/bulk-status', protect, authorize('recruiter', 'admin'), bulkUpdateStatus);
+
+// @route   GET /api/applications/:id/resume
+// @desc    Download resume for an application
+// @access  Private
+router.get('/:id/resume', protect, validateObjectId('id'), downloadResume);
 
 module.exports = router;

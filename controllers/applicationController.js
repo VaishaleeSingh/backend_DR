@@ -1,5 +1,7 @@
 const Application = require('../models/Application');
 const Job = require('../models/Job');
+const path = require('path');
+const fs = require('fs');
 
 // @desc    Get all applications
 // @route   GET /api/applications
@@ -153,9 +155,12 @@ const createApplication = async (req, res, next) => {
     // Handle resume file if uploaded
     if (resumeFile) {
       applicationData.resume = {
-        filename: resumeFile.originalname,
-        contentType: resumeFile.mimetype,
-        data: resumeFile.buffer
+        filename: resumeFile.filename,
+        originalName: resumeFile.originalname,
+        path: resumeFile.path,
+        size: resumeFile.size,
+        mimetype: resumeFile.mimetype,
+        uploadedAt: new Date()
       };
     }
 
@@ -406,6 +411,108 @@ const bulkUpdateStatus = async (req, res, next) => {
   }
 };
 
+// @desc    Download resume for an application
+// @route   GET /api/applications/:id/resume
+// @access  Private
+const downloadResume = async (req, res, next) => {
+  try {
+    const application = await Application.findById(req.params.id)
+      .populate('job', 'title company')
+      .populate('applicant', 'firstName lastName email');
+
+    if (!application) {
+      return res.status(404).json({
+        success: false,
+        message: 'Application not found'
+      });
+    }
+
+    // Check authorization
+    const isOwner = application.applicant._id.toString() === req.user.id;
+    const isJobOwner = await Job.findOne({ _id: application.job._id, postedBy: req.user.id });
+    const isAdmin = req.user.role === 'admin';
+
+    if (!isOwner && !isJobOwner && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to download this resume'
+      });
+    }
+
+    // Check if resume exists
+    if (!application.resume || !application.resume.path) {
+      return res.status(404).json({
+        success: false,
+        message: 'Resume not found for this application'
+      });
+    }
+
+    // Try multiple possible file paths for different environments
+    let filePath = application.resume.path;
+    let fileExists = false;
+
+    // Check if file exists at the stored path
+    if (fs.existsSync(filePath)) {
+      fileExists = true;
+    } else {
+      // Try alternative paths for deployed environments
+      const possiblePaths = [
+        path.join(__dirname, '..', 'uploads', 'resumes', application.resume.filename),
+        path.join(__dirname, '..', 'uploads', 'resumes', application.resume.originalName),
+        path.join(process.cwd(), 'uploads', 'resumes', application.resume.filename),
+        path.join(process.cwd(), 'uploads', 'resumes', application.resume.originalName),
+        path.join('/tmp', 'uploads', 'resumes', application.resume.filename),
+        path.join('/tmp', 'uploads', 'resumes', application.resume.originalName)
+      ];
+
+      for (const altPath of possiblePaths) {
+        if (fs.existsSync(altPath)) {
+          filePath = altPath;
+          fileExists = true;
+          break;
+        }
+      }
+    }
+
+    if (!fileExists) {
+      console.error('Resume file not found at any location:', {
+        originalPath: application.resume.path,
+        filename: application.resume.filename,
+        originalName: application.resume.originalName
+      });
+      
+      return res.status(404).json({
+        success: false,
+        message: 'Resume file not found on server'
+      });
+    }
+
+    // Set headers for file download
+    const filename = application.resume.originalName || application.resume.filename;
+    res.setHeader('Content-Type', application.resume.mimetype || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', application.resume.size || fs.statSync(filePath).size);
+
+    // Stream the file
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
+
+    fileStream.on('error', (error) => {
+      console.error('Error streaming resume file:', error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          message: 'Error downloading resume file'
+        });
+      }
+    });
+
+  } catch (error) {
+    console.error('Download resume error:', error);
+    next(error);
+  }
+};
+
 module.exports = {
   getApplications,
   getApplication,
@@ -418,5 +525,6 @@ module.exports = {
   rateApplication,
   getApplicationsByJob,
   exportApplications,
-  bulkUpdateStatus
+  bulkUpdateStatus,
+  downloadResume
 };
